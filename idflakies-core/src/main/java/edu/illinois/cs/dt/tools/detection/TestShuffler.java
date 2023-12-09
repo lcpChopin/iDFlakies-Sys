@@ -300,6 +300,16 @@ public class TestShuffler {
         return fullTestOrder;
     }
 
+    public List<String> tuscanWithAllTestsOrder(int round) {
+        int n = tests.size(); // n is number of tests
+        final List<String> fullTestOrder = new ArrayList<>();
+	int[][] testOrdering = Tuscan.generateTuscanPermutations(n);
+        for (int i = 0; i < testOrdering[round].length - 1; i++) {
+	    fullTestOrder.add(tests.get(testOrdering[round][i]));
+        }
+        return fullTestOrder;
+    }
+
     public List<String> tuscanInterClass(int round) {
         List<String> classes = new ArrayList<>(classToMethods.keySet());
         HashMap<String, int[][]> classToPermutations = new HashMap<String, int[][]>();

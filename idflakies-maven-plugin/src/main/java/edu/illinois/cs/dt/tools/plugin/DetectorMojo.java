@@ -20,6 +20,7 @@ import edu.illinois.cs.testrunner.runner.Runner;
 import edu.illinois.cs.testrunner.runner.RunnerFactory;
 import edu.illinois.cs.testrunner.testobjects.TestLocator;
 
+import org.apache.maven.artifact.DependencyResolutionRequiredException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.ResolutionScope;
@@ -27,10 +28,16 @@ import org.apache.maven.project.MavenProject;
 
 import scala.collection.JavaConverters;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.RuntimeException;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -259,19 +266,54 @@ public class DetectorMojo extends AbstractIDFlakiesMojo {
                     return;
                 }
             } else {
-                String errorMsg;
+		String errorMsg;
                 if (runners.size() == 0) {
                     errorMsg =
-                        "Module is not using a supported test framework (probably not JUnit), " +
-                        "or there is no test.";
+                            "Module is not using a supported test framework (probably not JUnit), " +
+                                    "or there is no test.";
                 } else {
-                    // more than one runner, currently is not supported.
+                    // more than one runner, figure out what type the desired
+                    // test is by reflecting, then use corresponding runner.
+                    try {
+                        String framework = "";
+			String testname = Configuration.config().getProperty("dt.testClass", "");
+			Class testClass = projectClassLoader().loadClass(testname);
+                        Method[] declaredMethods = testClass.getDeclaredMethods();
+                        Method[] methods = testClass.getMethods();
+                        Method[] allMethods = Arrays.copyOf(declaredMethods,
+                                declaredMethods.length + methods.length);
+                        System.arraycopy(methods, 0, allMethods, declaredMethods.length, methods.length);
+                        // check annotations on all methods to determine which framework to use
+                        for (Method meth : allMethods) {
+                            for (Annotation a : meth.getDeclaredAnnotations()) {
+                                if (a.toString().startsWith("@org.junit.Test(")) {
+                                    framework = "JUnit";
+                                    break;
+                                } else if (a.toString().startsWith("@org.junit.jupiter.api.Test(")) {
+                                    framework = "JUnit5";
+                                    break;
+                                }
+                            }
+                            if (!framework.equals("")) {
+                                break;
+                            }
+                        }
+                        // identified the framework, so search through runners finding the corresponding one
+                        for (Runner r : runners) {
+                            if (r.framework().toString().equals(framework)) {
+                                this.runner = InstrumentingSmartRunner.fromRunner(r, mavenProject.getBasedir());
+                                return;
+                            }
+                        }
+                    } catch (Exception ex) {
+                        System.out.println("Caught exception when trying to determine best framework: " + ex);
+                    }
+
                     errorMsg =
-                        "This project contains both JUnit 4 and JUnit 5 tests, which currently"
-                        + " is not supported by iDFlakies";
+                            "This project contains both JUnit 4 and JUnit 5 tests, which currently"
+                                    + " is not supported by iDFlakies";
                 }
-                Logger.getGlobal().log(Level.INFO, errorMsg);
-                logger.writeError(errorMsg);
+                System.out.println(errorMsg);
                 return;
             }
         }
@@ -281,6 +323,28 @@ public class DetectorMojo extends AbstractIDFlakiesMojo {
         }
     }
 
+    private URLClassLoader projectClassLoader() throws DependencyResolutionRequiredException {
+        // Get the project classpath, it will be useful for many things
+        List<URL> urlList = new ArrayList();
+        for (String cp : classpath().split(":")) {
+            try {
+                urlList.add(new File(cp).toURL());
+            } catch (MalformedURLException mue) {
+                System.out.println("Classpath element " + cp + " is malformed!");
+            }
+        }
+        URL[] urls = urlList.toArray(new URL[urlList.size()]);
+        return URLClassLoader.newInstance(urls);
+    }
+
+    private String classpath() throws DependencyResolutionRequiredException {
+        final List<String> elements = new ArrayList<>(mavenProject.getCompileClasspathElements());
+        elements.addAll(mavenProject.getRuntimeClasspathElements());
+        elements.addAll(mavenProject.getTestClasspathElements());
+
+        return String.join(File.pathSeparator, elements);
+    }
+
     protected List<String> getTests(
             final MavenProject project,
             TestFramework testFramework) throws IOException {
@@ -288,9 +352,18 @@ public class DetectorMojo extends AbstractIDFlakiesMojo {
     }
 
     protected Void detectorExecute(final ErrorLogger logger, final MavenProject mavenProject, final int rounds) throws IOException {
-        final List<String> tests = getTests(mavenProject, this.runner.framework());
+        final List<String> allTests = getTests(mavenProject, this.runner.framework());
 
-        if (!tests.isEmpty()) {
+	String testClass = Configuration.config().getProperty("dt.testClass", ""); 
+        List<String> tests = new ArrayList<>();
+	for (String test : allTests) {
+	    // System.out.println(test);
+	    String className = test.substring(0, test.lastIndexOf(this.runner.framework().getDelimiter()));
+	    if (className.equals(testClass) || className.startsWith(testClass + "New")) {
+	        tests.add(test);
+	    }
+	}	
+	if (!tests.isEmpty()) {
             Files.createDirectories(outputPath);
             Files.write(PathManager.selectedTestPath(), String.join(System.lineSeparator(), tests).getBytes());
             final Detector detector = DetectorFactory.makeDetector(this.runner, mavenProject.getBasedir(), tests, rounds);

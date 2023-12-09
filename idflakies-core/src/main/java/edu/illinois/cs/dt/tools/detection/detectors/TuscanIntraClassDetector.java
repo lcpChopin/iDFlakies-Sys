@@ -46,11 +46,11 @@ public class TuscanIntraClassDetector extends ExecutingDetector {
         for (final String test : tests) {
             final String className = TestShuffler.className(test);
             if (!classToMethods.containsKey(className)) {
-                classToMethods.put(className, new ArrayList<>());
+               classToMethods.put(className, new ArrayList<>());
             }
             classToMethods.get(className).add(test);
         }
-        int classSize = classToMethods.keySet().size();
+        /* int classSize = classToMethods.keySet().size();
         if (classSize == 3 || classSize == 5) {
             classSize++;
         }
@@ -66,9 +66,14 @@ public class TuscanIntraClassDetector extends ExecutingDetector {
             if (num_of_order > maxMethodSize) {
                 num_of_order = maxMethodSize;
             }
+        } */
+	int testSize = tests.size();
+	num_of_order = testSize;
+	if (testSize == 3 || testSize == 5) {
+            num_of_order ++;
         }
         this.tests = tests;
-	    String s = Integer.toString(num_of_order);
+	String s = Integer.toString(num_of_order);
         Logger.getGlobal().log(Level.INFO, "INITIAL CALCULATED NUM OF ORDERS: " + num_of_order);
         this.testShuffler = new TestShuffler(type, num_of_order, tests, baseDir);
         this.origResult = DetectorUtil.originalResults(tests, runner);
@@ -78,14 +83,14 @@ public class TuscanIntraClassDetector extends ExecutingDetector {
             addFilter(new ConfirmationFilter(name, tests, InstrumentingSmartRunner.fromRunner(runner, baseDir)));
         }
         addFilter(new UniqueFilter());
-	    Set<List<String>> ordersSet = new HashSet<>();
+	Set<List<String>> ordersSet = new HashSet<>();
         int num = 0;
         for (int i = 0; i < num_of_order; i ++) {
-            List<String> order = testShuffler.tuscanIntraClassOrder(i);
+            List<String> order = testShuffler.tuscanWithAllTestsOrder(i);
             if (!ordersSet.contains(order)) {
                 ExecutingDetector.writeOrder(order, PathManager.ordersPath(), num, tests);
-		        num ++;
-		        orders.add(order);
+		num ++;
+		orders.add(order);
             } else {
                 ordersSet.add(order);
             }
